@@ -4,7 +4,7 @@ export interface TranscriptRow {
   content: string;
 }
 
-export type NVNodeType = 'code' | 'quotation' | 'memo';
+export type NVNodeType = 'code' | 'group' | 'quotation' | 'memo';
 
 export interface NVNode {
   id: string;
@@ -16,7 +16,7 @@ export interface NVNode {
   width: number;
   height: number;
   sourceId?: string; // codeId or quotationId
-  subLabel?: string; // e.g. document name for quotation
+  subLabel?: string; // e.g. document name for quotation, or parent code name for group
 }
 
 export interface NVEdge {

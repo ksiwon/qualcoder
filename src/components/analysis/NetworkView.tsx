@@ -33,8 +33,6 @@ const Sidebar = styled.div`
   display: flex; flex-direction: column; overflow: hidden; z-index: 2;
 `;
 
-
-
 const SidebarScroll = styled.div`flex: 1; overflow-y: auto; padding: 6px 8px;`;
 
 const CodePill = styled.div<{ $color: string; $dim?: boolean }>`
@@ -49,6 +47,21 @@ const CodePill = styled.div<{ $color: string; $dim?: boolean }>`
   transition: opacity 0.12s, transform 0.1s, box-shadow 0.1s;
   box-shadow: 0 2px 6px ${p => p.$color}66;
   &:hover { transform: translateX(2px) scale(1.02); box-shadow: 0 4px 12px ${p => p.$color}88; }
+  &:active { cursor: grabbing; }
+`;
+
+const GroupPill = styled.div<{ $color: string; $dim?: boolean }>`
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 10px; border-radius: 8px; margin-bottom: 4px;
+  cursor: grab;
+  border: 2px solid ${p => p.$color};
+  background: white;
+  font-size: 11px; font-weight: 700;
+  color: #222;
+  opacity: ${p => p.$dim ? 0.4 : 1};
+  transition: opacity 0.12s, transform 0.1s, box-shadow 0.1s;
+  box-shadow: 0 2px 6px ${p => p.$color}44;
+  &:hover { transform: translateX(2px); box-shadow: 0 4px 12px ${p => p.$color}66; background: ${p => p.$color}0D; }
   &:active { cursor: grabbing; }
 `;
 
@@ -93,7 +106,7 @@ const SbSearch = styled.input`
   margin-bottom: 8px;
 `;
 const SbAddGrid = styled.div`
-  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
 `;
 const SbAddBtn = styled.button`
   font-size: 10.5px; font-weight: 600; padding: 5px 0; border-radius: 4px;
@@ -134,6 +147,8 @@ const EmptyHint = styled.div`
 
 const CODE_W = 240;
 const CODE_H = 70;
+const GROUP_W = 200;
+const GROUP_H = 70;
 const QUOT_W = 140;
 const QUOT_H = 60;
 const MEMO_W = 160;
@@ -154,6 +169,15 @@ const getNodeHeight = (node: NVNode) => {
       if (cur > 17) { lines++; cur = 0; }
     }
     return Math.max(node.height, 40 + lines * 18);
+  }
+  if (node.type === 'group') {
+    let lines = 1;
+    let cur = 0;
+    for (let i = 0; i < node.label.length; i++) {
+      cur += node.label.charCodeAt(i) > 255 ? 1 : 0.55;
+      if (cur > 15) { lines++; cur = 0; }
+    }
+    return Math.max(node.height, 44 + lines * 17);
   }
   if (node.type === 'quotation') {
     let lines = 1;
@@ -180,7 +204,7 @@ const getNodeHeight = (node: NVNode) => {
 
 export const NetworkView = () => {
   const { 
-    codes, quotations, documents, 
+    codes, quotations, documents, codeGroups,
     networkNodes: nodes, networkEdges: edges,
     addNetworkNode, updateNetworkNode, deleteNetworkNode,
     addNetworkEdge, deleteNetworkEdge, setNetworkData,
@@ -193,7 +217,7 @@ export const NetworkView = () => {
   const [isPanning, setIsPanning] = useState(false);
 
   // Sidebar tab
-  const [sideTab, setSideTab] = useState<'code' | 'quotation' | 'memo'>('code');
+  const [sideTab, setSideTab] = useState<'code' | 'group' | 'quotation' | 'memo'>('code');
   const [search, setSearch] = useState('');
 
   // Refs to avoid stale closures in pointer handlers
@@ -277,6 +301,15 @@ export const NetworkView = () => {
       });
       return;
     }
+    if (type === 'group') {
+      if (sourceId && nodesRef.current.some(n => n.sourceId === sourceId)) return;
+      addNetworkNode({
+        id: crypto.randomUUID(), type: 'group', label, color, subLabel,
+        x: pt.x - GROUP_W / 2, y: pt.y - GROUP_H / 2,
+        width: GROUP_W, height: GROUP_H, sourceId,
+      });
+      return;
+    }
     if (type === 'quotation') {
       if (sourceId && nodesRef.current.some(n => n.sourceId === sourceId)) return;
       addNetworkNode({
@@ -291,6 +324,8 @@ export const NetworkView = () => {
     const pt = { x: panRef.current.x * -1 / zoomRef.current + 200, y: panRef.current.y * -1 / zoomRef.current + 150 };
     if (type === 'code') {
       addNetworkNode({ id: crypto.randomUUID(), type: 'code', label: '새 코드', color: '#E07B54', x: pt.x, y: pt.y, width: CODE_W, height: CODE_H });
+    } else if (type === 'group') {
+      addNetworkNode({ id: crypto.randomUUID(), type: 'group', label: '새 그룹', color: '#A3CF62', x: pt.x + 10, y: pt.y + 10, width: GROUP_W, height: GROUP_H });
     } else if (type === 'quotation') {
       addNetworkNode({ id: crypto.randomUUID(), type: 'quotation', label: '새 인용', color: '#61D9A5', x: pt.x + 20, y: pt.y + 20, width: QUOT_W, height: QUOT_H });
     } else {
@@ -302,7 +337,7 @@ export const NetworkView = () => {
   // ─── Node pointer down ────────────────────────────────────────────────────
   const handleNodePD = useCallback((e: React.PointerEvent, nodeId: string) => {
     if ((e.target as SVGElement).dataset.port) return;
-    if ((e.target as SVGElement).dataset.del) return; // delete button handled separately
+    if ((e.target as SVGElement).dataset.del) return;
     e.stopPropagation();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     const node = nodesRef.current.find(n => n.id === nodeId)!;
@@ -427,6 +462,7 @@ export const NetworkView = () => {
     const sel = selectedId === node.id;
     const c = node.color;
 
+    // ── CODE ──
     if (node.type === 'code') {
       const actualHeight = getNodeHeight(node);
       return (
@@ -437,15 +473,11 @@ export const NetworkView = () => {
           onPointerUp={handleNodePU}
           onDoubleClick={e => handleNodeDbl(e, node.id)}
           style={{ cursor: 'grab' }}>
-          {/* Glow when selected */}
           {sel && <rect x={-4} y={-4} width={node.width + 8} height={actualHeight + 8} rx={14} fill="none" stroke={c} strokeWidth={2.5} opacity={0.4} />}
-          {/* Main body — solid color */}
           <rect width={node.width} height={actualHeight} rx={10}
             fill={c} stroke={sel ? '#fff' : c} strokeWidth={sel ? 2.5 : 0}
             filter="drop-shadow(0 3px 8px rgba(0,0,0,0.25))" />
-          {/* Shine line */}
           <rect x={6} y={5} width={node.width - 12} height={4} rx={2} fill="rgba(255,255,255,0.25)" />
-          {/* Label */}
           <foreignObject x={10} y={15} width={node.width - 20} height={actualHeight - 30}>
             <div style={{
               width: '100%', height: '100%',
@@ -458,20 +490,16 @@ export const NetworkView = () => {
               {node.label}
             </div>
           </foreignObject>
-          {/* Badge */}
           <text x={8} y={actualHeight - 7} fontSize={7.5} fontWeight={700} fill="rgba(255,255,255,0.6)"
             style={{ pointerEvents: 'none' }}>CODE</text>
-          {/* Input port (top) */}
           <circle cx={node.width / 2} cy={0} r={PORT_R}
             fill="white" stroke={c} strokeWidth={2.5}
             data-port="in" style={{ cursor: 'crosshair' }}
             onPointerDown={e => handlePortPD(e, node.id)} />
-          {/* Output port (bottom) */}
           <circle cx={node.width / 2} cy={actualHeight} r={PORT_R}
             fill={c} stroke="white" strokeWidth={2}
             data-port="out" style={{ cursor: 'crosshair' }}
             onPointerDown={e => handlePortPD(e, node.id)} />
-          {/* Delete button — uses onPointerDown with data-del so it doesn't trigger nodeDrag */}
           {sel && (
             <g transform={`translate(${node.width + 2}, -14)`}
               data-del="true"
@@ -490,6 +518,78 @@ export const NetworkView = () => {
       );
     }
 
+    // ── GROUP ──
+    if (node.type === 'group') {
+      const actualHeight = getNodeHeight(node);
+      return (
+        <g key={node.id} data-node={node.id}
+          transform={`translate(${node.x},${node.y})`}
+          onPointerDown={e => handleNodePD(e, node.id)}
+          onPointerMove={handleNodePM}
+          onPointerUp={handleNodePU}
+          onDoubleClick={e => handleNodeDbl(e, node.id)}
+          style={{ cursor: 'grab' }}>
+          {/* 선택 글로우 */}
+          {sel && <rect x={-4} y={-4} width={node.width + 8} height={actualHeight + 8} rx={14}
+            fill="none" stroke={c} strokeWidth={2.5} opacity={0.5} />}
+          {/* 흰색 카드 배경 */}
+          <rect width={node.width} height={actualHeight} rx={10}
+            fill="white" stroke={c} strokeWidth={sel ? 2.5 : 2}
+            filter="drop-shadow(0 3px 10px rgba(0,0,0,0.18))" />
+          {/* 좌측 컬러 악센트 바 */}
+          <rect x={0} y={10} width={4} height={actualHeight - 20} fill={c + 'DD'} />
+          <rect x={0} y={10} width={4} height={10} rx={0} fill={c + 'DD'} />
+          <rect x={0} y={actualHeight - 20} width={4} height={10} rx={0} fill={c + 'DD'} />
+          <rect x={0} y={10} width={4} height={actualHeight - 20} fill={c + 'DD'} />
+          {/* 우측 상단 작은 GROUP 텍스트 */}
+          <text x={node.width - 8} y={12} textAnchor="end" fontSize={7.5} fontWeight={700}
+            fill={c + 'BB'} style={{ pointerEvents: 'none', letterSpacing: '0.5px' }}>GROUP</text>
+          {/* 라벨 — 진한 텍스트 */}
+          <foreignObject x={12} y={18} width={node.width - 20} height={actualHeight - 34}>
+            <div style={{
+              fontSize: '11.5px', fontWeight: 700, color: '#222',
+              lineHeight: '1.5', pointerEvents: 'none', fontFamily: 'inherit',
+              wordBreak: 'keep-all',
+            }}>
+              {node.label}
+            </div>
+          </foreignObject>
+          {/* 부모 코드명 (우하단) */}
+          {node.subLabel && (
+            <text x={node.width - 8} y={actualHeight - 7} fontSize={8.5} fill={c}
+              textAnchor="end" fontWeight={700} style={{ pointerEvents: 'none' }}>
+              ↑ {truncate(node.subLabel, 18)}
+            </text>
+          )}
+          {/* 포트 */}
+          <circle cx={node.width / 2} cy={0} r={PORT_R}
+            fill="white" stroke={c} strokeWidth={2.5}
+            data-port="in" style={{ cursor: 'crosshair' }}
+            onPointerDown={e => handlePortPD(e, node.id)} />
+          <circle cx={node.width / 2} cy={actualHeight} r={PORT_R}
+            fill={c} stroke="white" strokeWidth={2}
+            data-port="out" style={{ cursor: 'crosshair' }}
+            onPointerDown={e => handlePortPD(e, node.id)} />
+          {/* 삭제 버튼 */}
+          {sel && (
+            <g transform={`translate(${node.width + 2}, -14)`}
+              data-del="true"
+              style={{ cursor: 'pointer' }}
+              onPointerDown={e => { e.stopPropagation(); }}
+              onPointerUp={e => { e.stopPropagation(); deleteNetworkNode(node.id); }}>
+              <circle cx={10} cy={10} r={11} fill="#DC2626" stroke="white" strokeWidth={1.5}
+                data-del="true"
+                filter="drop-shadow(0 2px 4px rgba(0,0,0,0.3))" />
+              <text x={10} y={10} textAnchor="middle" dominantBaseline="middle"
+                data-del="true"
+                fontSize={15} fill="white" fontWeight={700} style={{ pointerEvents: 'none' }}>×</text>
+            </g>
+          )}
+        </g>
+      );
+    }
+
+    // ── QUOTATION ──
     if (node.type === 'quotation') {
       const actualHeight = getNodeHeight(node);
       return (
@@ -500,18 +600,14 @@ export const NetworkView = () => {
           onPointerUp={handleNodePU}
           onDoubleClick={e => handleNodeDbl(e, node.id)}
           style={{ cursor: 'grab' }}>
-          {/* Glow */}
           {sel && <rect x={-4} y={-4} width={node.width + 8} height={actualHeight + 8} rx={10} fill={c} opacity={0.15} />}
-          {/* Card background */}
           <rect width={node.width} height={actualHeight} rx={7}
             fill="white" stroke={sel ? c : '#D0CDC9'} strokeWidth={sel ? 2 : 1.5}
             filter="drop-shadow(0 3px 10px rgba(0,0,0,0.15))" />
-          {/* Left accent bar */}
           <rect x={0} y={0} width={5} height={actualHeight} rx={7}
             fill={c} style={{ pointerEvents: 'none' }} />
           <rect x={0} y={actualHeight / 2} width={5} height={actualHeight / 2} rx={0}
             fill={c} style={{ pointerEvents: 'none' }} />
-          {/* Quote text */}
           <text x={14} y={22} fontSize={10.5} fontWeight={600} fill="#555" style={{ pointerEvents: 'none' }}>❝</text>
           <foreignObject x={22} y={14} width={node.width - 30} height={actualHeight - 30}>
             <div style={{
@@ -521,17 +617,14 @@ export const NetworkView = () => {
               {node.label}
             </div>
           </foreignObject>
-          {/* Sub label (doc name) */}
           {node.subLabel && (
             <text x={14} y={actualHeight - 11} fontSize={9} fill={c} fontWeight={700}
               style={{ pointerEvents: 'none' }}>
               📄 {truncate(node.subLabel, 22)}
             </text>
           )}
-          {/* Badge */}
           <text x={node.width - 8} y={10} textAnchor="end" fontSize={7.5} fontWeight={700} fill={c}
             opacity={0.7} style={{ pointerEvents: 'none' }}>QUOT</text>
-          {/* Ports */}
           <circle cx={node.width / 2} cy={0} r={PORT_R}
             fill="white" stroke={c} strokeWidth={2.5}
             data-port="in" style={{ cursor: 'crosshair' }}
@@ -540,7 +633,6 @@ export const NetworkView = () => {
             fill={c} stroke="white" strokeWidth={2}
             data-port="out" style={{ cursor: 'crosshair' }}
             onPointerDown={e => handlePortPD(e, node.id)} />
-          {/* Delete */}
           {sel && (
             <g transform={`translate(${node.width + 2}, -14)`}
               data-del="true"
@@ -559,7 +651,7 @@ export const NetworkView = () => {
       );
     }
 
-    // memo type
+    // ── MEMO ──
     const actualHeight = getNodeHeight(node);
     return (
       <g key={node.id} data-node={node.id}
@@ -617,6 +709,7 @@ export const NetworkView = () => {
           <SbSearch value={search} onChange={e => setSearch(e.target.value)} placeholder="검색..." />
           <SbAddGrid>
             <SbAddBtn onClick={() => handleAddBlock('code')}>+ 코드</SbAddBtn>
+            <SbAddBtn onClick={() => handleAddBlock('group')}>+ 그룹</SbAddBtn>
             <SbAddBtn onClick={() => handleAddBlock('quotation')}>+ 인용</SbAddBtn>
             <SbAddBtn onClick={() => handleAddBlock('memo')}>+ 메모</SbAddBtn>
           </SbAddGrid>
@@ -624,18 +717,18 @@ export const NetworkView = () => {
 
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          {(['code', 'quotation', 'memo'] as const).map(tab => (
+          {(['code', 'group', 'quotation', 'memo'] as const).map(tab => (
             <button key={tab}
               onClick={() => setSideTab(tab)}
               style={{
-                flex: 1, padding: '9px 4px', fontSize: 10, fontWeight: 700,
-                textTransform: 'uppercase', letterSpacing: '0.4px',
+                flex: 1, padding: '9px 2px', fontSize: 9.5, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.3px',
                 borderBottom: sideTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
                 color: sideTab === tab ? 'var(--accent)' : 'var(--text-muted)',
                 background: 'transparent',
               }}
             >
-              {tab === 'code' ? '코드' : tab === 'quotation' ? '인용' : '메모'}
+              {tab === 'code' ? '코드' : tab === 'group' ? '그룹' : tab === 'quotation' ? '인용' : '메모'}
             </button>
           ))}
         </div>
@@ -655,11 +748,54 @@ export const NetworkView = () => {
                     e.dataTransfer.setData('nv-color', code.color);
                     e.dataTransfer.setData('nv-label', code.name);
                   }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{code.name}</span>
+                  <span style={{ flex: 1 }}>{code.name}</span>
                   {onCanvasSourceIds.has(code.id) && <span style={{ fontSize: 9, opacity: 0.7 }}>✓</span>}
                 </CodePill>
               ))}
               {codes.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>코드가 없습니다.</div>}
+            </>
+          )}
+
+          {/* ── GROUP TAB ── */}
+          {sideTab === 'group' && (
+            <>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '6px 2px 8px', lineHeight: 1.5 }}>
+                드래그하여 캔버스에 연결
+              </div>
+              {codeGroups
+                .filter(g => !search || g.name.toLowerCase().includes(search.toLowerCase()))
+                .map(group => {
+                  const parentCode = codes.find(c => c.id === group.codeId);
+                  return (
+                    <GroupPill key={group.id} $color={group.color} $dim={onCanvasSourceIds.has(group.id)}
+                      draggable onDragStart={e => {
+                        e.dataTransfer.setData('nv-type', 'group');
+                        e.dataTransfer.setData('nv-id', group.id);
+                        e.dataTransfer.setData('nv-color', group.color);
+                        e.dataTransfer.setData('nv-label', group.name);
+                        e.dataTransfer.setData('nv-sublabel', parentCode?.name || '');
+                      }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: 11.5, fontWeight: 700, color: '#222', lineHeight: 1.4,
+                          wordBreak: 'keep-all',
+                        }}>
+                          {group.name}
+                        </div>
+                        {parentCode && (
+                          <div style={{
+                            fontSize: 9.5, fontWeight: 700, marginTop: 3,
+                            color: group.color,
+                          }}>
+                            ↑ {parentCode.name}
+                          </div>
+                        )}
+                      </div>
+                      {onCanvasSourceIds.has(group.id) && <span style={{ fontSize: 9, opacity: 0.6, flexShrink: 0 }}>✓</span>}
+                    </GroupPill>
+                  );
+                })}
+              {codeGroups.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>그룹이 없습니다.</div>}
             </>
           )}
 
@@ -679,10 +815,10 @@ export const NetworkView = () => {
                     e.dataTransfer.setData('nv-sublabel', q.docName);
                   }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 500, lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                      "{truncate(q.text, 60)}"
+                    <div style={{ fontSize: 10.5, fontWeight: 500, lineHeight: 1.4 }}>
+                      "{q.text}"
                     </div>
-                    {q.docName && <div style={{ fontSize: 9.5, color: 'var(--text-muted)', marginTop: 3 }}>📄 {truncate(q.docName, 20)}</div>}
+                    {q.docName && <div style={{ fontSize: 9.5, color: 'var(--text-muted)', marginTop: 3 }}>📄 {q.docName}</div>}
                   </div>
                   {onCanvasSourceIds.has(q.id) && <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>✓</span>}
                 </QuotPill>
@@ -741,7 +877,7 @@ export const NetworkView = () => {
             <div style={{ fontSize: 42 }}>🕸️</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-secondary)' }}>캔버스가 비어 있습니다</div>
             <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--text-muted)' }}>
-              왼쪽 패널에서 코드·인용문·레이블을<br />
+              왼쪽 패널에서 코드·그룹·인용문·메모를<br />
               드래그하여 캔버스에 배치하세요.<br />
               ● 포트를 드래그하면 연결선을 그릴 수 있습니다.
             </div>
@@ -776,24 +912,18 @@ export const NetworkView = () => {
               if (!a || !b) return null;
               const d = edgePath(a, b);
               
-              // Calculate midpoint for delete button
               const aH = getNodeHeight(a);
               const mx = (a.x + a.width/2 + b.x + b.width/2) / 2;
               const my = (a.y + aH + b.y) / 2;
 
               return (
                 <g key={ed.id} className="edge-group" data-edge="true" style={{ cursor: 'pointer' }}>
-                  {/* Thick hit area */}
                   <path d={d} fill="none" stroke="transparent" strokeWidth={16} 
                     onPointerDown={(e) => { e.stopPropagation(); deleteNetworkEdge(ed.id); }} />
-                  
-                  {/* Visible line */}
                   <path d={d} fill="none" stroke="#999" strokeWidth={2}
                     className="edge-line"
                     strokeDasharray="7,4" markerEnd="url(#nv-arr)"
                     style={{ pointerEvents: 'none', transition: 'stroke 0.2s, stroke-width 0.2s' }} />
-                  
-                  {/* Individual Delete Button on Line */}
                   <g transform={`translate(${mx - 10}, ${my - 10})`} 
                     className="edge-del"
                     onPointerDown={(e) => { e.stopPropagation(); deleteNetworkEdge(ed.id); }}
