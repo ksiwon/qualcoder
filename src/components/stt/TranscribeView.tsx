@@ -323,15 +323,40 @@ export const TranscribeView = () => {
 
   /* ─── Gemini API call ─── */
   const callGeminiTranscribe = async (audioFile: File, apiKey: string, modelId: string): Promise<string> => {
-    // Step 1: Upload file
-    const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`;
-    const formData = new FormData();
-    formData.append('file', audioFile, audioFile.name);
+    // Step 1: Upload file via Resumable Upload (avoid "Metadata part is too large" error)
+    const mimeType = audioFile.type || 'audio/mp4';
 
-    const uploadRes = await fetch(uploadUrl, {
+    // Step 1-a: Initiate resumable upload session
+    const initiateRes = await fetch(
+      `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Goog-Upload-Protocol': 'resumable',
+          'X-Goog-Upload-Command': 'start',
+          'X-Goog-Upload-Header-Content-Length': String(audioFile.size),
+          'X-Goog-Upload-Header-Content-Type': mimeType,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ file: { display_name: audioFile.name } }),
+      }
+    );
+    if (!initiateRes.ok) {
+      const err = await initiateRes.text();
+      throw new Error(`파일 업로드 실패: ${initiateRes.status} - ${err}`);
+    }
+    const resumableUrl = initiateRes.headers.get('X-Goog-Upload-URL');
+    if (!resumableUrl) throw new Error('Resumable upload URL을 가져올 수 없습니다.');
+
+    // Step 1-b: Upload the actual file bytes
+    const uploadRes = await fetch(resumableUrl, {
       method: 'POST',
-      headers: { 'X-Goog-Upload-Protocol': 'multipart' },
-      body: formData,
+      headers: {
+        'Content-Length': String(audioFile.size),
+        'X-Goog-Upload-Offset': '0',
+        'X-Goog-Upload-Command': 'upload, finalize',
+      },
+      body: audioFile,
     });
     if (!uploadRes.ok) {
       const err = await uploadRes.text();
@@ -339,7 +364,6 @@ export const TranscribeView = () => {
     }
     const uploadData = await uploadRes.json();
     const fileUri = uploadData.file?.uri;
-    const mimeType = uploadData.file?.mimeType || 'audio/mp4';
     if (!fileUri) throw new Error('파일 URI를 가져올 수 없습니다.');
 
     log(`  ✅ 업로드 완료 → ${uploadData.file?.name}`, 'success');
